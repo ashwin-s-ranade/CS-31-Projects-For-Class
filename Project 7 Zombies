@@ -1,0 +1,709 @@
+// zombies.cpp; Ashwin Ranade
+
+#include <iostream>
+#include <string>
+#include <random>
+#include <utility>
+#include <cstdlib>
+using namespace std;
+
+///////////////////////////////////////////////////////////////////////////
+// Manifest constants
+///////////////////////////////////////////////////////////////////////////
+
+const int MAXROWS = 20;              // max number of rows in the arena
+const int MAXCOLS = 30;              // max number of columns in the arena
+const int MAXZOMBIES = 150;          // max number of zombies allowed
+const int ZOMBIEHEALTH = 2;		     //amount of health zombie has 	
+
+const int UP = 0;
+const int DOWN = 1;
+const int LEFT = 2;
+const int RIGHT = 3;
+const int NUMDIRS = 4;
+
+///////////////////////////////////////////////////////////////////////////
+//  Auxiliary function declarations
+///////////////////////////////////////////////////////////////////////////
+
+int decodeDirection(char dir);
+int randInt(int min, int max);
+void clearScreen();
+
+///////////////////////////////////////////////////////////////////////////
+// Type definitions
+///////////////////////////////////////////////////////////////////////////
+
+class Arena;  // This is needed to let the compiler know that Arena is a
+			  // type name, since it's mentioned in the Zombie declaration.
+
+class Zombie
+{
+public:
+	// Constructor
+	Zombie(Arena* ap, int r, int c);
+
+	// Accessors
+	int  row() const;
+	int  col() const;
+
+	// Mutators
+	void move();
+	bool getAttacked(int dir);
+
+private:
+	Arena* m_arena;
+	int    m_row;
+	int    m_col;
+	int	   m_health; 
+};
+
+class Player
+{
+public:
+	// Constructor
+	Player(Arena *ap, int r, int c);
+
+	// Accessors
+	int  row() const;
+	int  col() const;
+	int  age() const;
+	bool isDead() const;
+
+	// Mutators
+	void   stand();
+	void   moveOrAttack(int dir);
+	void   setDead();
+
+private:
+	Arena* m_arena;
+	int    m_row;
+	int    m_col;
+	int    m_age;
+	bool   m_dead;
+};
+
+class Arena
+{
+public:
+	// Constructor/destructor
+	Arena(int nRows, int nCols);
+	~Arena();
+
+	// Accessors
+	int     rows() const;
+	int     cols() const;
+	Player* player() const;
+	int     zombieCount() const;
+	int     numZombiesAt(int r, int c) const;
+	bool    determineNewPosition(int& r, int& c, int dir) const;
+	void    display() const;
+
+	// Mutators
+	bool   addZombie(int r, int c);
+	bool   addPlayer(int r, int c);
+	bool   attackZombieAt(int r, int c, int dir);
+	bool   moveZombies();
+
+private:
+	int     m_rows;
+	int     m_cols;
+	Player* m_player;
+	Zombie* m_zombies[MAXZOMBIES];
+	int     m_nZombies;
+};
+
+class Game
+{
+public:
+	// Constructor/destructor
+	Game(int rows, int cols, int nZombies);
+	~Game();
+
+	// Mutators
+	void play();
+
+private:
+	Arena* m_arena;
+};
+
+///////////////////////////////////////////////////////////////////////////
+//  Zombie implementation
+///////////////////////////////////////////////////////////////////////////
+
+Zombie::Zombie(Arena* ap, int r, int c)
+{
+	if (ap == nullptr)
+	{
+		cout << "***** A zombie must be created in some Arena!" << endl;
+		exit(1);
+	}
+	if (r < 1 || r > ap->rows() || c < 1 || c > ap->cols())
+	{
+		cout << "***** Zombie created with invalid coordinates (" << r << ","
+			<< c << ")!" << endl;
+		exit(1);
+	}
+	m_arena = ap;
+	m_row = r;
+	m_col = c;
+	m_health = ZOMBIEHEALTH; 
+}
+
+int Zombie::row() const
+{
+	return m_row;
+}
+
+int Zombie::col() const
+{
+	return m_col;  
+}
+
+void Zombie::move()
+{
+	// Attempt to move in a random direction; if we can't move, don't move
+	int dir = randInt(0, NUMDIRS - 1);  // dir is now UP, DOWN, LEFT, or RIGHT
+
+	switch (dir)
+	{
+	case UP:
+		m_arena->determineNewPosition(m_row, m_col, UP); 
+		break;
+	case DOWN:
+		m_arena->determineNewPosition(m_row, m_col, DOWN); 
+		break;
+	case LEFT:
+		m_arena->determineNewPosition(m_row, m_col, LEFT);
+		break;
+	case RIGHT:
+		m_arena->determineNewPosition(m_row, m_col, RIGHT);
+		break;
+	default: //nothing should happen if dir != 1,2,3,4
+		break; 
+	}
+
+}	
+
+bool Zombie::getAttacked(int dir)  // return true if dies
+{
+	if (m_health == 1) //this means it has been attacked once, so another attack will kill it
+		return true; 
+	
+	switch (dir) {
+	case UP:
+		if (!m_arena->determineNewPosition(m_row, m_col, UP))
+			return true; //this means the zombie is dead
+		break;
+	case DOWN: 
+		if (!m_arena->determineNewPosition(m_row, m_col, DOWN))
+			return true; //this means the zombie is dead because it hit a wall
+		break;
+	case LEFT: 
+		if (!m_arena->determineNewPosition(m_row, m_col, LEFT))
+			return true; //this means the zombie is dead
+		break;
+	case RIGHT: 
+		if (!m_arena->determineNewPosition(m_row, m_col, RIGHT))
+			return true; //this means the zombie is dead
+		break;
+	default:
+		break;
+	}
+	m_health--; //zombie survives, but need to decrement health now
+	return false;  // because zombie survives 
+}
+
+///////////////////////////////////////////////////////////////////////////
+//  Player implementations
+///////////////////////////////////////////////////////////////////////////
+
+Player::Player(Arena* ap, int r, int c)
+{
+	if (ap == nullptr)
+	{
+		cout << "***** The player must be created in some Arena!" << endl;
+		exit(1);
+	}
+	if (r < 1 || r > ap->rows() || c < 1 || c > ap->cols())
+	{
+		cout << "**** Player created with invalid coordinates (" << r
+			<< "," << c << ")!" << endl;
+		exit(1);
+	}
+	m_arena = ap;
+	m_row = r;
+	m_col = c;
+	m_age = 0;
+	m_dead = false;
+}
+
+int Player::row() const
+{
+	return m_row;  
+}
+
+int Player::col() const
+{
+	return m_col;
+}
+
+int Player::age() const
+{
+	return m_age;  
+}
+
+void Player::stand()
+{
+	m_age++;
+}
+
+void Player::moveOrAttack(int dir)
+{
+	m_age++;
+	switch (dir) {
+	case UP:
+		if (m_row != 1 && m_arena->numZombiesAt(m_row - 1, m_col) == 0)
+			m_row--; //if there are no zombies and you aren't on the top row, move up
+		else if (m_row != 1)//this means there are zombies above
+			m_arena ->attackZombieAt(m_row - 1, m_col, dir);
+		break;
+	case DOWN: 
+		if (m_row != m_arena->rows() && m_arena->numZombiesAt(m_row + 1, m_col) == 0)
+			m_row++;
+		else if (m_row != m_arena->rows())//so there are zombies below
+			m_arena->attackZombieAt(m_row + 1, m_col, dir); 
+		break;
+	case LEFT:
+		if (m_col != 1 && m_arena->numZombiesAt(m_row, m_col - 1) == 0)
+			m_col--;
+		else if (m_col != 1)
+			m_arena->attackZombieAt(m_row, m_col - 1, dir); 
+		break;
+	case RIGHT: 
+		if (m_col != m_arena->cols() && m_arena->numZombiesAt(m_row, m_col + 1) == 0)
+			m_col++;
+		else if (m_col != m_arena->cols())
+			m_arena->attackZombieAt(m_row, m_col + 1, dir);
+		break;
+	default: 
+		break;
+	}
+}
+
+bool Player::isDead() const
+{
+	return m_dead;
+}
+
+void Player::setDead()
+{
+	m_dead = true;
+}
+
+///////////////////////////////////////////////////////////////////////////
+//  Arena implementations
+///////////////////////////////////////////////////////////////////////////
+
+Arena::Arena(int nRows, int nCols)
+{
+	if (nRows <= 0 || nCols <= 0 || nRows > MAXROWS || nCols > MAXCOLS)
+	{
+		cout << "***** Arena created with invalid size " << nRows << " by "
+			<< nCols << "!" << endl;
+		exit(1);
+	}
+	m_rows = nRows;
+	m_cols = nCols;
+	m_player = nullptr;
+	m_nZombies = 0;
+}
+
+Arena::~Arena()
+{
+
+	for (int i = 0; i < m_nZombies; i++) {
+		delete m_zombies[i]; //delete the pointer at m_zombies
+	}
+	delete m_player; //delete dynamically allocated player 
+
+}
+
+int Arena::rows() const
+{
+	return m_rows;  
+}
+
+int Arena::cols() const
+{
+	return m_cols;
+}
+
+Player* Arena::player() const
+{
+	return m_player;
+}
+
+int Arena::zombieCount() const
+{
+	return m_nZombies;
+}
+
+int Arena::numZombiesAt(int r, int c) const
+{
+	int count = 0; 
+	for (int i = 0; i < zombieCount(); i++) {
+		if (m_zombies[i]->row() == r && m_zombies[i]->col() == c)
+			count++; 
+	}
+	return count; 
+}
+
+bool Arena::determineNewPosition(int& r, int& c, int dir) const
+{
+
+	switch (dir)
+	{
+	case UP:
+		if (r == 1)
+			return false; 
+		r--;
+		break;
+	case DOWN:
+		if (r == rows()) //rows() refers to the # of rows in the Arena object 
+			return false; 
+		r++;
+		break; 
+	case LEFT:
+		if (c == 1)
+			return false; 
+		c--; 
+		break;
+	case RIGHT:
+		if (c == cols())
+			return false; 
+		c++; 
+		break;
+	default: //if dir is none of the above (which should never happen), the object should just stand still in the grid 
+		return false;
+	}
+	return true;
+}
+
+void Arena::display() const
+{
+	// Position (row,col) in the arena coordinate system is represented in
+	// the array element grid[row-1][col-1]
+	char grid[MAXROWS][MAXCOLS];
+	int r, c;
+
+	// Fill the grid with dots
+	for (r = 0; r < rows(); r++)
+		for (c = 0; c < cols(); c++)
+			grid[r][c] = '.';
+	
+	// Indicate each zombie's position
+  //If one zombie is at some grid point, set the char to 'Z'.
+  //        If it's 2 though 8, set it to '2' through '8'.
+  //        For 9 or more, set it to '9'.
+	//loop through all grid squares and check numZombiesAt for all of those 
+	//loop through all grid squres and check numZombiesAt for all of those
+	for (int i = 0; i < rows(); i++) {
+		for (int j = 0; j < cols(); j++) {
+			switch (numZombiesAt(i+1, j+1)) {
+			case 0:
+				grid[i][j] = '.'; 
+				break; 
+			case 1: 
+				grid[i][j] = 'Z'; 
+				break; 
+			case 2:
+			case 3: 
+			case 4: 
+			case 5: 
+			case 6: 
+			case 7: 
+			case 8: 
+				grid[i][j] = '0' + numZombiesAt(i+1, j+1);
+				break; 
+			default: 
+				grid[i][j] = 9; 
+				break; //logically unnecessary, but it's good form 
+			}
+		}
+	}
+	// Indicate player's position
+	if (m_player != nullptr)
+	{
+		// Set the char to '@', unless there's also a zombie there,
+		// in which case set it to '*'.
+		char& gridChar = grid[m_player->row() - 1][m_player->col() - 1];
+		if (gridChar == '.')
+			gridChar = '@';
+		else
+			gridChar = '*';
+	}
+
+	// Draw the grid
+	clearScreen();
+	for (r = 0; r < rows(); r++)
+	{
+		for (c = 0; c < cols(); c++)
+			cout << grid[r][c];
+		cout << endl;
+	}
+	cout << endl;
+
+	// Write message, zombie, and player info
+	cout << endl;
+	cout << "There are " << zombieCount() << " zombies remaining." << endl;
+	
+	if (m_player == nullptr)
+		cout << "There is no player." << endl;
+	else
+	{
+		if (m_player->age() > 0)
+			cout << "The player has lasted " << m_player->age() << " steps." << endl;
+		if (m_player->isDead())
+			cout << "The player is dead." << endl;
+	}
+}
+
+bool Arena::addZombie(int r, int c)
+{
+	if (zombieCount() == MAXZOMBIES) 
+		return false;
+	m_zombies[m_nZombies] = new Zombie(this, r, c);
+	m_nZombies++; //increase # of zombies by 1 
+	
+	return true; 
+}
+
+bool Arena::addPlayer(int r, int c)
+{
+	// Don't add a player if one already exists
+	if (m_player != nullptr)
+		return false;
+
+	// Dynamically allocate a new Player and add it to the arena
+	m_player = new Player(this, r, c);
+	return true;
+}
+
+bool Arena::attackZombieAt(int r, int c, int dir)
+{
+	if (numZombiesAt(r, c) == 0)
+		return false; 
+	//need to check zombie at (r,c), and then use getAttacked on that zombie
+	for (int i = 0; i < m_nZombies; i++) {
+		if (m_zombies[i]->row() == r && m_zombies[i]->col() == c) {
+			if (m_zombies[i]->getAttacked(dir)) {
+				//if the zombie is dead, delete the zombie; in the if statement, health gets decremented because we are passing a pointer
+				//destroy zombie object, and shift array
+				delete m_zombies[i]; //deletes the dynamically allocated memory block to which the pointer points to, leaving a dangling pointer
+				//now, time to reassign pointer so it isn't dangling 
+				for (int k = i; k < m_nZombies-1; k++)//need to add m_nZombies -1 so we don't go out of bounds 
+					m_zombies[k] = m_zombies[k + 1]; 
+				m_nZombies--; //decrease the size of m_zombies[]
+				return true;
+			}
+			else {
+				return false; //we want the program to exit the method to moment we find a zombie at (r,c), so add this return statement here 
+			}
+		}
+	}
+
+	return false;  // Loop through and no zombie matches (r,c); thereotically, this should never happen 
+}
+
+bool Arena::moveZombies()
+{
+	for (int k = 0; k < m_nZombies; k++)
+	{
+		m_zombies[k]->move(); //IMPORTANT PIECE OF CODE; MAKES SURE MOVE FUNCTION IS TO THE SPECIFIED ZOMBIE OBJECT
+
+		//now need to check if the player is dead here 
+		if (m_player->row() == m_zombies[k]->row() && m_player->col() == m_zombies[k]->col())
+			m_player->setDead(); 
+	}
+
+	// return true if the player is still alive, false otherwise
+	return !m_player->isDead();
+}
+
+///////////////////////////////////////////////////////////////////////////
+//  Game implementations
+///////////////////////////////////////////////////////////////////////////
+
+Game::Game(int rows, int cols, int nZombies)
+{
+	if (nZombies < 0)
+	{
+		cout << "***** Cannot create Game with negative number of zombies!" << endl;
+		exit(1);
+	}
+	if (nZombies > MAXZOMBIES)
+	{
+		cout << "***** Trying to create Game with " << nZombies
+			<< " zombies; only " << MAXZOMBIES << " are allowed!" << endl;
+		exit(1);
+	}
+	if (rows == 1 && cols == 1 && nZombies > 0)
+	{
+		cout << "***** Cannot create Game with nowhere to place the zombies!" << endl;
+		exit(1);
+	}
+
+	// Create arena
+	m_arena = new Arena(rows, cols);
+
+	// Add player
+	int rPlayer = randInt(1, rows);
+	int cPlayer = randInt(1, cols);
+	m_arena->addPlayer(rPlayer, cPlayer);
+
+	// Populate with zombies
+	while (nZombies > 0)
+	{
+		int r = randInt(1, rows);
+		int c = randInt(1, cols);
+		// Don't put a zombie where the player is
+		if (r == rPlayer && c == cPlayer)
+			continue;
+		m_arena->addZombie(r, c);
+		nZombies--;
+	}
+}
+
+Game::~Game()
+{
+	delete m_arena;
+}
+
+void Game::play()
+{
+	m_arena->display();
+	Player* p = m_arena->player();
+	if (p == nullptr)
+		return;
+	while (!m_arena->player()->isDead() && m_arena->zombieCount() > 0)
+	{
+		cout << endl;
+		cout << "Move (u/d/l/r//q): ";
+		string action;
+		getline(cin, action);
+		if (action.size() == 0)  // player stands
+			p->stand();
+		else
+		{
+			switch (action[0])
+			{
+			default:   // if bad move, nobody moves
+				cout << '\a' << endl;  // beep
+				continue;
+			case 'q':
+				return;
+			case 'u':
+			case 'd':
+			case 'l':
+			case 'r':
+				p->moveOrAttack(decodeDirection(action[0]));
+				break;
+			}
+		}
+		m_arena->moveZombies();
+		m_arena->display();
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+//  Auxiliary function implementations
+///////////////////////////////////////////////////////////////////////////
+
+int decodeDirection(char dir)
+{
+	switch (dir)
+	{
+	case 'u':  return UP;
+	case 'd':  return DOWN;
+	case 'l':  return LEFT;
+	case 'r':  return RIGHT;
+	}
+	return -1;  // bad argument passed in!
+}
+
+// Return a random int from min to max, inclusive
+int randInt(int min, int max)
+{
+	if (max < min)
+		swap(max, min);
+	static random_device rd;
+	static default_random_engine generator(rd());
+	uniform_int_distribution<> distro(min, max);
+	return distro(generator);
+}
+
+///////////////////////////////////////////////////////////////////////////
+//  main()
+///////////////////////////////////////////////////////////////////////////
+int main()
+{
+
+	// Create a game
+	// Use this instead to create a mini-game:   Game g(3, 4, 2);
+	Game g(7, 8, 25);
+
+	// Play the game
+	g.play();
+}
+
+///////////////////////////////////////////////////////////////////////////
+//  clearScreen implementation
+///////////////////////////////////////////////////////////////////////////
+
+// DO NOT MODIFY OR REMOVE ANY CODE BETWEEN HERE AND THE END OF THE FILE!!!
+// THE CODE IS SUITABLE FOR VISUAL C++, XCODE, AND g++ UNDER LINUX.
+
+// Note to Xcode users:  clearScreen() will just write a newline instead
+// of clearing the window if you launch your program from within Xcode.
+// That's acceptable.  (The Xcode output window doesn't have the capability
+// of being cleared.)
+
+#ifdef _MSC_VER  //  Microsoft Visual C++
+
+#include <windows.h>
+
+void clearScreen()
+{
+	HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	GetConsoleScreenBufferInfo(hConsole, &csbi);
+	DWORD dwConSize = csbi.dwSize.X * csbi.dwSize.Y;
+	COORD upperLeft = { 0, 0 };
+	DWORD dwCharsWritten;
+	FillConsoleOutputCharacter(hConsole, TCHAR(' '), dwConSize, upperLeft,
+		&dwCharsWritten);
+	SetConsoleCursorPosition(hConsole, upperLeft);
+}
+
+#else  // not Microsoft Visual C++, so assume UNIX interface
+
+#include <iostream>
+#include <cstring>
+#include <cstdlib>
+
+void clearScreen()  // will just write a newline in an Xcode output window
+{
+	static const char* term = getenv("TERM");
+	if (term == nullptr || strcmp(term, "dumb") == 0)
+		cout << endl;
+	else
+	{
+		static const char* ESC_SEQ = "\x1B[";  // ANSI Terminal esc seq:  ESC [
+		cout << ESC_SEQ << "2J" << ESC_SEQ << "H" << flush;
+	}
+}
+
+#endif
+
+
